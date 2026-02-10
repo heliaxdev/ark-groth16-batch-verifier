@@ -319,6 +319,9 @@ mod tests {
 
         let mut transcript = Transcript::new_blank();
 
+        // An empty batch should succeed since there are no proofs to verify.
+        // The pairing product over an empty set is the identity element,
+        // which is expected to equal 1 in the target group.
         let result = batch_verify::<BATCH_SIZE, NUM_PUB_INPUTS, Bls12_381>(
             &bpvk,
             &proofs_array,
@@ -429,6 +432,8 @@ mod tests {
         let mut proofs_vec = Vec::with_capacity(BATCH_SIZE);
         let mut inputs_vec = Vec::with_capacity(BATCH_SIZE);
 
+        const INVALID_PROOF_INDEX: usize = BATCH_SIZE / 2;
+
         for i in 0..BATCH_SIZE {
             let a = Fr::rand(&mut rng);
             let b = Fr::rand(&mut rng);
@@ -443,8 +448,8 @@ mod tests {
 
             proofs_vec.push(proof);
             
-            // For the middle proof (index 4), use an incorrect public input
-            if i == 4 {
+            // For one proof in the middle, use an incorrect public input
+            if i == INVALID_PROOF_INDEX {
                 // Use wrong public input - should make batch verification fail
                 inputs_vec.push([c + Fr::from(1u64)]);
             } else {
