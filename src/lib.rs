@@ -1,5 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 
+extern crate alloc;
+
+use alloc::vec::Vec;
 use core::iter;
 use core::ops::Neg;
 
@@ -11,9 +14,61 @@ use ark_relations::r1cs::Result;
 use ark_relations::r1cs::SynthesisError;
 use ark_transcript::{IsLabel, Transcript};
 
+#[repr(C)]
+struct HeadTail<const N: usize, T> {
+    head: T,
+    tail: [T; N],
+}
+
+impl<const N: usize, T> HeadTail<N, T> {
+    #[inline]
+    fn as_slice(&self) -> &[T] {
+        // SAFETY: (T, [T; N]) should have the same ABI as [T; N+1]
+        unsafe { core::slice::from_raw_parts(&self.head as *const _ as *const _, N + 1) }
+    }
+}
+
+/// VerifyingKey optimized for batch verification.
+#[derive(Clone, Debug)]
+pub struct BatchPreparedVerifyingKey<E: Pairing> {
+    /// The alpha_g1 element
+    pub alpha_g1: E::G1Affine,
+    /// -beta_g2, prepared for the Miller loop
+    pub neg_beta_g2_prepared: E::G2Prepared,
+    /// -gamma_g2, prepared for the Miller loop
+    pub neg_gamma_g2_prepared: E::G2Prepared,
+    /// -delta_g2, prepared for the Miller loop
+    pub neg_delta_g2_prepared: E::G2Prepared,
+    /// The public input commitments (S_i)
+    pub gamma_abc_g1: Vec<E::G1Affine>,
+}
+
+impl<E: Pairing> BatchPreparedVerifyingKey<E> {
+    /// Further processes a [`PreparedVerifyingKey`] for batch verification of Groth16
+    /// proofs belonging to the same circuit.
+    ///
+    /// ## Implementation details
+    ///
+    /// This performs the expensive G2 negation and preparation step for beta
+    /// upfront, saving time during repeated batch verifications.
+    #[inline]
+    pub fn from_pvk(pvk: &PreparedVerifyingKey<E>) -> Self
+    where
+        E::G2Affine: Neg<Output = E::G2Affine>,
+    {
+        Self {
+            gamma_abc_g1: pvk.vk.gamma_abc_g1.clone(),
+            alpha_g1: pvk.vk.alpha_g1,
+            neg_beta_g2_prepared: E::G2Prepared::from(-pvk.vk.beta_g2),
+            neg_gamma_g2_prepared: pvk.gamma_g2_neg_pc.clone(),
+            neg_delta_g2_prepared: pvk.delta_g2_neg_pc.clone(),
+        }
+    }
+}
+
 /// Verify a batch of Groth16 proofs of the same circuit.
 pub fn batch_verify<'proof, const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
-    pvk: &PreparedVerifyingKey<E>,
+    bpvk: &BatchPreparedVerifyingKey<E>,
     proofs: &'proof [Proof<E>; BATCH_SIZE],
     inputs: &'proof [[E::ScalarField; NUM_PUB_INPUTS]; BATCH_SIZE],
     transcript: &mut Transcript,
@@ -22,7 +77,7 @@ where
     E: Pairing,
     E::G2Affine: Neg<Output = E::G2Affine>,
 {
-    if pvk.vk.gamma_abc_g1.len() != NUM_PUB_INPUTS + 1 {
+    if bpvk.gamma_abc_g1.len() != NUM_PUB_INPUTS + 1 {
         return Err(SynthesisError::MalformedVerifyingKey);
     }
 
@@ -37,31 +92,26 @@ where
         let head = challenges_sum;
 
         // compute the weighted sum for each public input column
-        let rest = {
-            let mut rest = [E::ScalarField::zero(); NUM_PUB_INPUTS];
+        let tail = {
+            let mut tail = [E::ScalarField::zero(); NUM_PUB_INPUTS];
 
             for i in 0..NUM_PUB_INPUTS {
                 let mut sum = E::ScalarField::zero();
                 for b in 0..BATCH_SIZE {
                     sum += challenges[b] * inputs[b][i];
                 }
-                rest[i] = sum;
+                tail[i] = sum;
             }
 
-            rest
+            tail
         };
 
         // NB: we use a hack to get a slice with NUM_PUB_INPUTS+1 elements,
         // since there are no const generic ops yet to statically initialize
         // an array with NUM_PUB_INPUTS+1 elements
-        let input_scalars = (head, rest);
+        let input_scalars = HeadTail { head, tail };
 
-        // SAFETY: (T, [T; N]) should have the same ABI as [T; N+1]
-        let input_scalars_ref = unsafe {
-            core::slice::from_raw_parts(&input_scalars as *const _ as *const _, NUM_PUB_INPUTS + 1)
-        };
-
-        <E::G1 as VariableBaseMSM>::msm(&pvk.vk.gamma_abc_g1, input_scalars_ref)
+        <E::G1 as VariableBaseMSM>::msm(&bpvk.gamma_abc_g1, input_scalars.as_slice())
             .map_err(|_| SynthesisError::Unsatisfiable)?
     };
 
@@ -80,7 +130,7 @@ where
     };
 
     let g1_terms = {
-        let p_alpha = pvk.vk.alpha_g1 * challenges_sum;
+        let p_alpha = bpvk.alpha_g1 * challenges_sum;
         let g1_proof_terms = (0..BATCH_SIZE).map(|b| proofs[b].a * challenges[b]);
         let g1_static_terms = iter::once(p_alpha)
             .chain(iter::once(c_agg))
@@ -88,11 +138,10 @@ where
         g1_proof_terms.chain(g1_static_terms)
     };
     let g2_terms = {
-        let neg_beta_prep = E::G2Prepared::from(-pvk.vk.beta_g2);
         let g2_proof_terms = proofs.iter().map(|p| E::G2Prepared::from(p.b));
-        let g2_static_terms = iter::once(neg_beta_prep)
-            .chain(iter::once(pvk.delta_g2_neg_pc.clone()))
-            .chain(iter::once(pvk.gamma_g2_neg_pc.clone()));
+        let g2_static_terms = iter::once(bpvk.neg_beta_g2_prepared.clone())
+            .chain(iter::once(bpvk.neg_delta_g2_prepared.clone()))
+            .chain(iter::once(bpvk.neg_gamma_g2_prepared.clone()));
         g2_proof_terms.chain(g2_static_terms)
     };
 
@@ -202,7 +251,10 @@ mod tests {
         let circuit_setup = DummyCircuit { a: None, b: None };
         let (pk, vk) =
             Groth16::<Bls12_381>::circuit_specific_setup(circuit_setup, &mut rng).unwrap();
-        let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+        let bpvk = {
+            let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+            BatchPreparedVerifyingKey::from_pvk(&pvk)
+        };
 
         const BATCH_SIZE: usize = 8;
         const NUM_PUB_INPUTS: usize = 1;
@@ -237,7 +289,7 @@ mod tests {
         let mut transcript = Transcript::new_blank();
 
         let result = batch_verify::<BATCH_SIZE, NUM_PUB_INPUTS, Bls12_381>(
-            &pvk,
+            &bpvk,
             &proofs_array,
             &inputs_array,
             &mut transcript,
