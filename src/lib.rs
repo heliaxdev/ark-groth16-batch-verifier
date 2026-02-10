@@ -28,7 +28,8 @@ impl<const N: usize, T> HeadTail<N, T> {
     }
 }
 
-/// VerifyingKey optimized for batch verification.
+/// Verifying key optimized for batch verification of
+/// Groth16 proofs belonging to the same circuit.
 #[derive(Clone, Debug)]
 pub struct BatchPreparedVerifyingKey<E: Pairing> {
     /// The alpha_g1 element
