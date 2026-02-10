@@ -298,4 +298,178 @@ mod tests {
 
         assert!(result, "Batch verification failed!");
     }
+
+    #[test]
+    fn test_batch_verification_empty_batch() {
+        let mut rng = StdRng::seed_from_u64(12345);
+
+        let circuit_setup = DummyCircuit { a: None, b: None };
+        let (_, vk) =
+            Groth16::<Bls12_381>::circuit_specific_setup(circuit_setup, &mut rng).unwrap();
+        let bpvk = {
+            let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+            BatchPreparedVerifyingKey::from_pvk(&pvk)
+        };
+
+        const BATCH_SIZE: usize = 0;
+        const NUM_PUB_INPUTS: usize = 1;
+
+        let proofs_array: [Proof<Bls12_381>; BATCH_SIZE] = [];
+        let inputs_array: [[Fr; NUM_PUB_INPUTS]; BATCH_SIZE] = [];
+
+        let mut transcript = Transcript::new_blank();
+
+        let result = batch_verify::<BATCH_SIZE, NUM_PUB_INPUTS, Bls12_381>(
+            &bpvk,
+            &proofs_array,
+            &inputs_array,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert!(result, "Empty batch verification should succeed!");
+    }
+
+    #[test]
+    fn test_batch_verification_no_public_inputs() {
+        let mut rng = StdRng::seed_from_u64(12346);
+
+        // Need a circuit with no public inputs
+        #[derive(Clone)]
+        struct NoInputCircuit {
+            pub a: Option<Fr>,
+            pub b: Option<Fr>,
+        }
+
+        impl ConstraintSynthesizer<Fr> for NoInputCircuit {
+            fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<()> {
+                let a = cs.new_witness_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
+                let b = cs.new_witness_variable(|| self.b.ok_or(SynthesisError::AssignmentMissing))?;
+                let c = cs.new_witness_variable(|| {
+                    let a = self.a.ok_or(SynthesisError::AssignmentMissing)?;
+                    let b = self.b.ok_or(SynthesisError::AssignmentMissing)?;
+                    Ok(a * b)
+                })?;
+
+                cs.enforce_constraint(
+                    LinearCombination::from(a),
+                    LinearCombination::from(b),
+                    LinearCombination::from(c),
+                )?;
+
+                Ok(())
+            }
+        }
+
+        let circuit_setup = NoInputCircuit { a: None, b: None };
+        let (pk, vk) =
+            Groth16::<Bls12_381>::circuit_specific_setup(circuit_setup, &mut rng).unwrap();
+        let bpvk = {
+            let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+            BatchPreparedVerifyingKey::from_pvk(&pvk)
+        };
+
+        const BATCH_SIZE: usize = 4;
+        const NUM_PUB_INPUTS: usize = 0;
+
+        let mut proofs_vec = Vec::with_capacity(BATCH_SIZE);
+        let mut inputs_vec = Vec::with_capacity(BATCH_SIZE);
+
+        for _ in 0..BATCH_SIZE {
+            let a = Fr::rand(&mut rng);
+            let b = Fr::rand(&mut rng);
+
+            let circuit = NoInputCircuit {
+                a: Some(a),
+                b: Some(b),
+            };
+
+            let proof = Groth16::<Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
+
+            proofs_vec.push(proof);
+            inputs_vec.push([]);
+        }
+
+        let proofs_array: [Proof<Bls12_381>; BATCH_SIZE] = proofs_vec
+            .try_into()
+            .unwrap_or_else(|_| panic!("Vec length mismatch"));
+
+        let inputs_array: [[Fr; NUM_PUB_INPUTS]; BATCH_SIZE] = inputs_vec
+            .try_into()
+            .unwrap_or_else(|_| panic!("Vec length mismatch"));
+
+        let mut transcript = Transcript::new_blank();
+
+        let result = batch_verify::<BATCH_SIZE, NUM_PUB_INPUTS, Bls12_381>(
+            &bpvk,
+            &proofs_array,
+            &inputs_array,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert!(result, "Batch verification with no public inputs failed!");
+    }
+
+    #[test]
+    fn test_batch_verification_invalid_proofs() {
+        let mut rng = StdRng::seed_from_u64(12347);
+
+        let circuit_setup = DummyCircuit { a: None, b: None };
+        let (pk, vk) =
+            Groth16::<Bls12_381>::circuit_specific_setup(circuit_setup, &mut rng).unwrap();
+        let bpvk = {
+            let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+            BatchPreparedVerifyingKey::from_pvk(&pvk)
+        };
+
+        const BATCH_SIZE: usize = 8;
+        const NUM_PUB_INPUTS: usize = 1;
+
+        let mut proofs_vec = Vec::with_capacity(BATCH_SIZE);
+        let mut inputs_vec = Vec::with_capacity(BATCH_SIZE);
+
+        for i in 0..BATCH_SIZE {
+            let a = Fr::rand(&mut rng);
+            let b = Fr::rand(&mut rng);
+            let c = a * b;
+
+            let circuit = DummyCircuit {
+                a: Some(a),
+                b: Some(b),
+            };
+
+            let proof = Groth16::<Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
+
+            proofs_vec.push(proof);
+            
+            // For the middle proof (index 4), use an incorrect public input
+            if i == 4 {
+                // Use wrong public input - should make batch verification fail
+                inputs_vec.push([c + Fr::from(1u64)]);
+            } else {
+                inputs_vec.push([c]);
+            }
+        }
+
+        let proofs_array: [Proof<Bls12_381>; BATCH_SIZE] = proofs_vec
+            .try_into()
+            .unwrap_or_else(|_| panic!("Vec length mismatch"));
+
+        let inputs_array: [[Fr; NUM_PUB_INPUTS]; BATCH_SIZE] = inputs_vec
+            .try_into()
+            .unwrap_or_else(|_| panic!("Vec length mismatch"));
+
+        let mut transcript = Transcript::new_blank();
+
+        let result = batch_verify::<BATCH_SIZE, NUM_PUB_INPUTS, Bls12_381>(
+            &bpvk,
+            &proofs_array,
+            &inputs_array,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert!(!result, "Batch verification should fail with invalid proof!");
+    }
 }
