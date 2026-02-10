@@ -76,7 +76,6 @@ pub fn batch_verify<const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
 ) -> Result<bool>
 where
     E: Pairing,
-    E::G2Affine: Neg<Output = E::G2Affine>,
 {
     if bpvk.gamma_abc_g1.len() != NUM_PUB_INPUTS + 1 {
         return Err(SynthesisError::MalformedVerifyingKey);
