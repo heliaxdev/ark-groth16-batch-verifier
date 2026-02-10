@@ -446,7 +446,7 @@ mod tests {
             let proof = Groth16::<Bls12_381>::prove(&pk, circuit, &mut rng).unwrap();
 
             proofs_vec.push(proof);
-            
+
             // For one proof in the middle, use an incorrect public input
             if i == INVALID_PROOF_INDEX {
                 // Use wrong public input - should make batch verification fail
@@ -474,6 +474,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!result, "Batch verification should fail with invalid proof!");
+        assert!(
+            !result,
+            "Batch verification should fail with invalid proof!"
+        );
     }
 }
