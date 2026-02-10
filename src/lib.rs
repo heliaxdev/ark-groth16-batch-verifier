@@ -147,10 +147,10 @@ where
 
     // $$
     // \left( \prod_{i=1}^n e(r_i A_i, B_i) \right) \cdot \
-    // e(R_{sum} \cdot \
-    // \alpha, -\beta) \cdot \
+    // e(R_{sum} \cdot \alpha, -\beta) \cdot \
     // e(C_{agg}, -\delta) \cdot \
-    // e(L_{agg}, -\gamma) = 1_{\mathbb{G}_T}
+    // e(L_{agg}, -\gamma) = \
+    // 1_{\mathbb{G}_T}
     // $$
     //
     // rendered: https://quicklatex.com/cache3/9d/ql_873db65b459e222333fd68c1faf98f9d_l3.png
