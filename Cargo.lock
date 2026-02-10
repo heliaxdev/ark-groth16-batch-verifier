@@ -145,6 +145,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-groth16-batch-verifier"
+version = "0.1.0"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff",
+ "ark-groth16",
+ "ark-relations",
+ "ark-snark",
+ "ark-std",
+ "ark-transcript",
+]
+
+[[package]]
 name = "ark-poly"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -364,20 +378,6 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
-]
-
-[[package]]
-name = "groth16-batch-verifier"
-version = "0.1.0"
-dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-ff",
- "ark-groth16",
- "ark-relations",
- "ark-snark",
- "ark-std",
- "ark-transcript",
 ]
 
 [[package]]
