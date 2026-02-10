@@ -67,10 +67,10 @@ impl<E: Pairing> BatchPreparedVerifyingKey<E> {
 }
 
 /// Verify a batch of Groth16 proofs of the same circuit.
-pub fn batch_verify<'proof, const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
+pub fn batch_verify<const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
     bpvk: &BatchPreparedVerifyingKey<E>,
-    proofs: &'proof [Proof<E>; BATCH_SIZE],
-    inputs: &'proof [[E::ScalarField; NUM_PUB_INPUTS]; BATCH_SIZE],
+    proofs: &[Proof<E>; BATCH_SIZE],
+    inputs: &[[E::ScalarField; NUM_PUB_INPUTS]; BATCH_SIZE],
     transcript: &mut Transcript,
 ) -> Result<bool>
 where
@@ -160,9 +160,9 @@ where
     Ok(result.0.is_one())
 }
 
-fn compute_challenges<'proof, const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
-    proofs: &'proof [Proof<E>; BATCH_SIZE],
-    inputs: &'proof [[E::ScalarField; NUM_PUB_INPUTS]; BATCH_SIZE],
+fn compute_challenges<const BATCH_SIZE: usize, const NUM_PUB_INPUTS: usize, E>(
+    proofs: &[Proof<E>; BATCH_SIZE],
+    inputs: &[[E::ScalarField; NUM_PUB_INPUTS]; BATCH_SIZE],
     transcript: &mut Transcript,
 ) -> [E::ScalarField; BATCH_SIZE]
 where
