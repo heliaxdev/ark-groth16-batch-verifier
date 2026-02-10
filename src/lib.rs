@@ -244,6 +244,32 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct NoInputCircuit {
+        pub a: Option<Fr>,
+        pub b: Option<Fr>,
+    }
+
+    impl ConstraintSynthesizer<Fr> for NoInputCircuit {
+        fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<()> {
+            let a = cs.new_witness_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
+            let b = cs.new_witness_variable(|| self.b.ok_or(SynthesisError::AssignmentMissing))?;
+            let c = cs.new_witness_variable(|| {
+                let a = self.a.ok_or(SynthesisError::AssignmentMissing)?;
+                let b = self.b.ok_or(SynthesisError::AssignmentMissing)?;
+                Ok(a * b)
+            })?;
+
+            cs.enforce_constraint(
+                LinearCombination::from(a),
+                LinearCombination::from(b),
+                LinearCombination::from(c),
+            )?;
+
+            Ok(())
+        }
+    }
+
     #[test]
     fn test_batch_verification() {
         let mut rng = StdRng::seed_from_u64(12345);
@@ -336,33 +362,6 @@ mod tests {
     #[test]
     fn test_batch_verification_no_public_inputs() {
         let mut rng = StdRng::seed_from_u64(12346);
-
-        // Need a circuit with no public inputs
-        #[derive(Clone)]
-        struct NoInputCircuit {
-            pub a: Option<Fr>,
-            pub b: Option<Fr>,
-        }
-
-        impl ConstraintSynthesizer<Fr> for NoInputCircuit {
-            fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<()> {
-                let a = cs.new_witness_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
-                let b = cs.new_witness_variable(|| self.b.ok_or(SynthesisError::AssignmentMissing))?;
-                let c = cs.new_witness_variable(|| {
-                    let a = self.a.ok_or(SynthesisError::AssignmentMissing)?;
-                    let b = self.b.ok_or(SynthesisError::AssignmentMissing)?;
-                    Ok(a * b)
-                })?;
-
-                cs.enforce_constraint(
-                    LinearCombination::from(a),
-                    LinearCombination::from(b),
-                    LinearCombination::from(c),
-                )?;
-
-                Ok(())
-            }
-        }
 
         let circuit_setup = NoInputCircuit { a: None, b: None };
         let (pk, vk) =
